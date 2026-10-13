@@ -1,0 +1,9 @@
+{
+  "id": "file-preview",
+  "name": "File preview",
+  "description": "Preview PDFs, images, video, audio, and HTML from your workspace in a Paseo browser tab.",
+  "build": [["npm", "ci", "--omit=dev", "--omit=optional"]],
+  "requirements": {
+    "paseo": ">=0.11.1"
+  }
+}
