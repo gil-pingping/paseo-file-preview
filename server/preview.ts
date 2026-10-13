@@ -168,7 +168,12 @@ export function stopServer(): void {
 
 function ensureServer(): Promise<number> {
   starting ??= new Promise<number>((resolve, reject) => {
-    pdfjsRoot ||= findPdfjsRoot();
+    // Without pdf.js, images/video/HTML still work; the PDF viewer reports the missing install.
+    try {
+      pdfjsRoot ||= findPdfjsRoot();
+    } catch (error) {
+      console.warn(String(error));
+    }
     const s = createServer((req, res) => {
       handle(req, res).catch((error) => send(res, error instanceof URIError ? 400 : 500, "error"));
     });
@@ -219,6 +224,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     return sendFile(req, res, target, type, { "content-security-policy": FILE_CSP });
   }
   if (route === "pdfjs") {
+    if (!pdfjsRoot) return send(res, 404, "pdfjs-dist is not installed");
     const target = path.join(pdfjsRoot, ...tail.split("/").map(decodeURIComponent));
     const type = PDFJS_MIME[path.extname(target)];
     if (!type || !isInside(pdfjsRoot, target)) return send(res, 404, "not found");

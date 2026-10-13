@@ -2,7 +2,7 @@
 // page, so PDFs render through pdf.js instead. `base` is the token-scoped URL prefix.
 export function viewerHtml(base: string, fileUrl: string, title: string, nonce: string): string {
   return `<!doctype html>
-<html lang="ko">
+<html>
 <meta charset="utf-8">
 <meta name="referrer" content="no-referrer">
 <title>${escapeHtml(title)}</title>
@@ -23,17 +23,28 @@ export function viewerHtml(base: string, fileUrl: string, title: string, nonce: 
   #msg form { display: flex; gap: 6px; justify-content: center; margin-top: 10px; }
 </style>
 <div id="bar">
-  <button id="prev" title="이전 페이지">↑</button><button id="next" title="다음 페이지">↓</button>
-  <input id="page" inputmode="numeric" aria-label="페이지"> <span id="count">/ –</span>
-  <button id="out" title="축소 (⌘-)">−</button><button id="in" title="확대 (⌘+)">+</button>
-  <button id="fit" title="폭 맞춤 (⌘0)">↔</button>
-  <input id="query" type="search" placeholder="검색 (⌘F)" aria-label="검색">
+  <button id="prev">↑</button><button id="next">↓</button>
+  <input id="page" inputmode="numeric"> <span id="count">/ –</span>
+  <button id="out">−</button><button id="in">+</button>
+  <button id="fit">↔</button>
+  <input id="query" type="search">
   <span id="status"></span>
 </div>
 <div id="c"><div id="v" class="pdfViewer"></div></div>
 <div id="msg"></div>
 <script type="module" nonce="${nonce}">
 const $ = (id) => document.getElementById(id);
+const T = navigator.language.toLowerCase().startsWith("ko")
+  ? { prev: "이전 페이지", next: "다음 페이지", page: "페이지", out: "축소 (⌘-)", in: "확대 (⌘+)", fit: "폭 맞춤 (⌘0)",
+      search: "검색 (⌘F)", noMatch: "결과 없음", locked: "암호로 보호된 PDF입니다.", wrong: "암호가 틀렸습니다.",
+      password: "암호", unlock: "열기", failed: "PDF를 열 수 없습니다.", noViewer: "PDF 뷰어(pdfjs-dist)가 설치되지 않았습니다." }
+  : { prev: "Previous page", next: "Next page", page: "Page", out: "Zoom out (⌘-)", in: "Zoom in (⌘+)", fit: "Fit width (⌘0)",
+      search: "Search (⌘F)", noMatch: "No matches", locked: "This PDF is password protected.", wrong: "Incorrect password.",
+      password: "Password", unlock: "Open", failed: "Could not open this PDF.", noViewer: "The PDF viewer (pdfjs-dist) is not installed." };
+document.documentElement.lang = navigator.language;
+for (const id of ["prev", "next", "out", "in", "fit"]) $(id).title = $(id).ariaLabel = T[id];
+$("page").ariaLabel = T.page;
+$("query").placeholder = $("query").ariaLabel = T.search;
 const showMessage = (text, detail) => {
   const box = $("msg");
   box.replaceChildren(text);
@@ -41,7 +52,9 @@ const showMessage = (text, detail) => {
   box.style.display = "grid";
 };
 try {
-  const pdfjsLib = await import(${JSON.stringify(`${base}/pdfjs/build/pdf.min.mjs`)});
+  const pdfjsLib = await import(${JSON.stringify(`${base}/pdfjs/build/pdf.min.mjs`)}).catch(() => {
+    throw new Error(T.noViewer);
+  });
   pdfjsLib.GlobalWorkerOptions.workerSrc = ${JSON.stringify(`${base}/pdfjs/build/pdf.worker.min.mjs`)};
   globalThis.pdfjsLib = pdfjsLib;
   const { EventBus, PDFFindController, PDFLinkService, PDFViewer } = await import(${JSON.stringify(`${base}/pdfjs/web/pdf_viewer.mjs`)});
@@ -72,7 +85,7 @@ try {
   $("query").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); find("again", e.shiftKey); } };
   const showMatches = ({ state, matchesCount }) => {
     if (!$("query").value) $("status").textContent = "";
-    else if (state === 1) $("status").textContent = "결과 없음";
+    else if (state === 1) $("status").textContent = T.noMatch;
     else if (matchesCount?.total) $("status").textContent = matchesCount.current + " / " + matchesCount.total;
   };
   eventBus.on("updatefindcontrolstate", showMatches);
@@ -94,11 +107,11 @@ try {
     isEvalSupported: false,
   });
   task.onPassword = (update, reason) => {
-    showMessage(reason === 2 ? "암호가 틀렸습니다." : "암호로 보호된 PDF입니다.");
+    showMessage(reason === 2 ? T.wrong : T.locked);
     const form = document.createElement("form");
     const input = Object.assign(document.createElement("input"), { type: "password" });
-    input.setAttribute("aria-label", "암호");
-    form.append(input, Object.assign(document.createElement("button"), { textContent: "열기" }));
+    input.setAttribute("aria-label", T.password);
+    form.append(input, Object.assign(document.createElement("button"), { textContent: T.unlock }));
     form.onsubmit = (e) => {
       e.preventDefault();
       $("msg").style.display = "none";
@@ -112,7 +125,7 @@ try {
   viewer.setDocument(doc);
   linkService.setDocument(doc);
 } catch (error) {
-  showMessage("PDF를 열 수 없습니다.", String(error?.message ?? error));
+  showMessage(T.failed, String(error?.message ?? error));
 }
 </script>
 </html>

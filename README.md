@@ -7,34 +7,34 @@ Preview PDFs, images, video, audio, and HTML from a Paseo workspace. Paseo's fil
 
 ## Install
 
-Requires Paseo 0.11.1 or newer, plugins enabled on the daemon host, and npm on that host to install pdf.js. Plugins run trusted code on the daemon host; review the source before installing.
+Requires Paseo 0.11.1 or newer, plugins enabled on the daemon host, and npm on that host so installation can fetch pdf.js (without it, PDFs cannot open but other files still preview). Plugins run trusted code on the daemon host; review the source before installing.
 
 ```bash
 paseo plugin add git:gil-pingping/paseo-file-preview
 paseo plugin ls file-preview
 ```
 
-Then open the right-hand panel's `+` menu in a workspace and choose **Preview** (미리보기).
+Then open the right-hand panel's `+` menu in a workspace and choose **Preview**. The UI follows the system language (English or Korean).
 
 ## How it works
 
-- `preview.list` scans the workspace directory, skipping hidden entries, symlinks, and build folders (`node_modules`, `dist`, `build`, `venv`, `target`, and similar). It returns the 5,000 most recently modified previewable files, and scans up to 50,000.
+- `preview.list` scans the workspace directory, skipping hidden entries, symlinks, and build folders (`node_modules`, `dist`, `build`, `venv`, `target`, and similar). It returns the 5,000 most recently modified previewable files and stops after visiting 200,000 directory entries. Both RPCs take a Paseo workspace ID; the server looks up the directory through the Paseo API instead of trusting a client-supplied path.
 - `preview.open` starts a Node HTTP server on `127.0.0.1` with a random port and a random 128-bit URL token, then returns a URL that the panel opens with Paseo's `openBrowser`. URLs are created when you select a file, so they stay valid after a plugin reload.
 
 ## Security
 
 Workspace files can be untrusted, for example in cloned repositories or downloaded PDFs.
 
-- The server answers only requests whose `Host` is `127.0.0.1:<port>`, which blocks DNS rebinding, and only under the secret token.
-- It serves a file only if its real path, after resolving symlinks, is inside a workspace opened from the panel.
-- Workspace files are served with `Content-Security-Policy: sandbox` (no `allow-same-origin`) and `X-Content-Type-Options: nosniff`. Scripts in a previewed HTML or SVG file run in an opaque origin and cannot read other files from the server.
-- pdf.js runs with `isEvalSupported: false`.
+- The server answers only requests whose `Host` is `127.0.0.1:<port>`, which blocks DNS rebinding.
+- Each workspace gets its own secret token. A URL serves a file only if its real path, after resolving symlinks, is inside that token's workspace.
+- Only previewable types and their page assets (CSS, JS, fonts) are served. Other files such as `.env` or keys are refused.
+- Workspace files are served with `Content-Security-Policy: sandbox` (no `allow-same-origin`), `default-src 'self' https:`, `form-action 'none'`, `nosniff`, and `no-referrer`. Scripts in a previewed HTML or SVG file run in an opaque origin, so they cannot read other files or reach other localhost services such as the Paseo daemon.
+- The PDF viewer page has a strict nonce-based CSP, and pdf.js runs with `isEvalSupported: false`.
 
 ## Limits
 
-- The daemon and the browser must be on the same computer. Remote daemons are not supported.
+- Paseo Desktop and its daemon must run on the same computer (the default setup). Viewing a daemon on another computer through the relay, LAN, or Tailscale, and the mobile app, are not supported: the preview server listens on the daemon host's `127.0.0.1`, and Paseo's `openBrowser` opens URLs in the client's own webview without tunnelling them. Remote support would need file bytes sent over plugin RPC and rendered in the panel.
 - Paseo plugin panels cannot embed web pages, so previews open in a separate browser tab, not inside the file tab.
-- Opens the in-app browser on Paseo Desktop and the system browser on other clients.
 - Office documents are not supported. HTML that loads JavaScript modules or fetches its own files fails inside the sandbox.
 - Tested on macOS with Paseo 0.11.1. Windows paths are handled but untested.
 

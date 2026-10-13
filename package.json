@@ -1,7 +1,7 @@
 {
   "name": "paseo-file-preview",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Paseo plugin that previews PDFs, images, video, audio, and HTML in a Paseo browser tab",
   "repository": {
     "type": "git",

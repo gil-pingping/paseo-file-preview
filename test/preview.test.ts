@@ -9,6 +9,13 @@ process.env.FILE_PREVIEW_PDFJS_ROOT = path.resolve("node_modules/pdfjs-dist");
 const { findPdfjsRoot, fromUrlPath, isInside, listPreviews, openPreview, parseRange, stopServer, toUrlPath } =
   await import("../server/preview.ts");
 
+test("UI strings follow the locale: Korean for ko, English otherwise", async () => {
+  const { strings } = await import("../shared/i18n.ts");
+  assert.equal(strings("ko-KR").panelTitle, "미리보기");
+  assert.equal(strings("en-US").panelTitle, "Preview");
+  assert.equal(strings("ja-JP").panelTitle, "Preview");
+});
+
 test("isInside rejects root itself, siblings, and traversal", () => {
   assert.equal(isInside("/a/b", "/a/b/c.pdf"), true);
   assert.equal(isInside("/a/b", "/a/b/..cache/c.pdf"), true);

@@ -3,17 +3,11 @@ import { useRpc, useWorkspace } from "@getpaseo/plugin/client";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { FlatList, Pressable, Text, TextInput, View } from "react-native";
+import { strings } from "../shared/i18n";
 import { listPreviewsRpc, openPreviewRpc, previewKinds, type PreviewKind } from "../shared/preview";
 import { openExternal } from "./web";
 
-const KIND_LABELS: Record<PreviewKind, string> = {
-  pdf: "PDF",
-  image: "이미지",
-  video: "영상",
-  audio: "오디오",
-  html: "HTML",
-};
-
+const t = strings();
 const NO_FILES: never[] = [];
 
 export function PreviewPanel({ workspaceId, theme, navigation }: PluginWorkspacePanelProps) {
@@ -79,9 +73,9 @@ export function PreviewPanel({ workspaceId, theme, navigation }: PluginWorkspace
         <TextInput
           value={filter}
           onChangeText={setFilter}
-          placeholder="파일 이름 필터"
+          placeholder={t.filterPlaceholder}
           placeholderTextColor={colors.foregroundMuted}
-          accessibilityLabel="파일 이름 필터"
+          accessibilityLabel={t.filterPlaceholder}
           style={{
             flex: 1,
             color: colors.foreground,
@@ -92,29 +86,29 @@ export function PreviewPanel({ workspaceId, theme, navigation }: PluginWorkspace
             paddingVertical: 4,
           }}
         />
-        <Pressable accessibilityRole="button" accessibilityLabel="새로고침" onPress={() => query.refetch()}>
+        <Pressable accessibilityRole="button" accessibilityLabel={t.refresh} onPress={() => query.refetch()}>
           <Text style={{ color: colors.foregroundMuted, padding: 4 }}>{query.isFetching ? "…" : "↻"}</Text>
         </Pressable>
       </View>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4, paddingHorizontal: 8, paddingBottom: 6 }}>
-        {chip(`전체 ${all.length}`, kind === null, () => setKind(null))}
+        {chip(`${t.all} ${all.length}`, kind === null, () => setKind(null))}
         {previewKinds
           .filter((k) => counts[k])
-          .map((k) => chip(`${KIND_LABELS[k]} ${counts[k]}`, kind === k, () => setKind(kind === k ? null : k)))}
+          .map((k) => chip(`${t.kinds[k]} ${counts[k]}`, kind === k, () => setKind(kind === k ? null : k)))}
       </View>
-      {query.isError ? notice(`목록을 불러오지 못했습니다: ${String(query.error)}`) : null}
-      {open.isError ? notice(`열지 못했습니다: ${String(open.error)}`) : null}
-      {query.data && query.data.total > all.length ? notice(`최근 수정된 ${all.length}개만 표시 (전체 ${query.data.total}개)`) : null}
+      {query.isError ? notice(`${t.listFailed}: ${String(query.error)}`) : null}
+      {open.isError ? notice(`${t.openFailed}: ${String(open.error)}`) : null}
+      {query.data && query.data.total > all.length ? notice(t.truncated(all.length, query.data.total)) : null}
       <FlatList
         data={files}
         keyExtractor={(file) => file.path}
-        ListEmptyComponent={notice(query.isLoading ? "불러오는 중…" : "미리볼 파일 없음")}
+        ListEmptyComponent={notice(query.isLoading ? t.loading : t.empty)}
         renderItem={({ item }) => {
           const slash = item.path.lastIndexOf("/");
           return (
             <Pressable
               accessibilityRole="link"
-              accessibilityLabel={`${KIND_LABELS[item.kind]} ${item.path} 열기`}
+              accessibilityLabel={t.open(t.kinds[item.kind], item.path)}
               onPress={() => {
                 if (!open.isPending) open.mutate(item.path);
               }}
@@ -125,7 +119,7 @@ export function PreviewPanel({ workspaceId, theme, navigation }: PluginWorkspace
               })}
             >
               <View style={{ flexDirection: "row", gap: 6, alignItems: "center" }}>
-                <Text style={{ fontSize: 10, color: colors.foregroundMuted, width: 38 }}>{KIND_LABELS[item.kind]}</Text>
+                <Text style={{ fontSize: 10, color: colors.foregroundMuted, width: 38 }}>{t.kinds[item.kind]}</Text>
                 <Text numberOfLines={1} style={{ flex: 1, color: colors.foreground }}>
                   {item.path.slice(slash + 1)}
                 </Text>
