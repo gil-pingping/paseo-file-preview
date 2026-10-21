@@ -249,3 +249,21 @@ function minimalPdf(): Buffer {
   body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
   return Buffer.from(body, "latin1");
 }
+
+test("pdf worker answers in-flight requests after stdin closes", async () => {
+  const { spawn } = await import("node:child_process");
+  const tmp = await mkdtemp(path.join(tmpdir(), "file-preview-worker-"));
+  const file = path.join(tmp, "doc.pdf");
+  await writeFile(file, minimalPdf());
+  const child = spawn("node", ["server/pdf-worker.mjs", path.resolve("node_modules/pdfjs-dist")]);
+  let out = "";
+  child.stdout.on("data", (chunk) => (out += chunk));
+  child.stdin.end(
+    [{ id: 1, op: "info", file }, { id: 2, op: "page", file, page: 1, width: 400 }].map((r) => JSON.stringify(r)).join("\n") + "\n",
+  );
+  const code = await new Promise((resolve) => child.on("exit", resolve));
+  const replies = out.trim().split("\n").map((line) => JSON.parse(line));
+  assert.equal(code, 0);
+  assert.deepEqual(replies.map((r) => r.id).sort(), [1, 2]);
+  assert.equal(replies.find((r) => r.id === 2).width, 400);
+});

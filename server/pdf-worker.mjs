@@ -75,4 +75,4 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
     process.stdout.write(JSON.stringify({ id, error: error instanceof Error ? error.message : String(error) }) + "\n");
   }
 });
-process.stdin.on("end", () => process.exit(0));
+// When stdin closes, Node exits on its own once in-flight renders finish.
