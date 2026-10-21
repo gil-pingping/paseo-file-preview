@@ -2,8 +2,13 @@
 
 Preview PDFs, images, video, audio, and HTML from a Paseo workspace. Paseo's file panel shows "binary preview unavailable" for these files ([getpaseo/paseo#3720](https://github.com/getpaseo/paseo/issues/3720)). This plugin adds a **Preview** panel that lists them newest first. Selecting one opens it in a Paseo browser tab.
 
+![Preview panel listing workspace files](docs/screenshots/preview-panel.png)
+
+![PDF viewer with search](docs/screenshots/pdf-viewer.png)
+
 - **PDF:** a bundled [pdf.js](https://mozilla.github.io/pdf.js/) viewer with page navigation, zoom, fit to width, full-text search (`⌘F`), and password prompts. Korean, Chinese, and Japanese PDFs render with the bundled CMaps. Paseo's in-app browser shows Chromium's own PDF viewer as a blank page, so pdf.js is required.
-- **Images, video, audio, HTML:** served to the browser directly, with HTTP Range support so video can seek. Relative links inside HTML resolve to sibling files.
+- **Images, video, audio:** open in a minimal player page (Paseo's browser tab shows a bare media file as a blank page). HTTP Range support lets video and audio seek.
+- **HTML:** opens as is. Relative links resolve to sibling files. Pages run sandboxed and can still load HTTPS resources, as any web page can.
 
 ## Install
 

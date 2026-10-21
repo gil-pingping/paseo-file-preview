@@ -135,3 +135,27 @@ try {
 function escapeHtml(text: string): string {
   return text.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 }
+
+/** Wrapper page for a bare image, video, or audio file; it needs no script. */
+export function mediaHtml(fileUrl: string, title: string, kind: "image" | "video" | "audio"): string {
+  const src = escapeHtml(fileUrl);
+  const element =
+    kind === "image"
+      ? `<img src="${src}" alt="${escapeHtml(title)}">`
+      : kind === "video"
+        ? `<video src="${src}" controls preload="metadata"></video>`
+        : `<audio src="${src}" controls preload="metadata"></audio>`;
+  return `<!doctype html>
+<meta charset="utf-8">
+<meta name="referrer" content="no-referrer">
+<title>${escapeHtml(title)}</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { height: 100%; margin: 0; background: #1e1e1e; }
+  body { display: flex; align-items: center; justify-content: center; }
+  img, video { max-width: 100%; max-height: 100%; object-fit: contain; }
+  audio { width: min(640px, 90%); }
+</style>
+${element}
+`;
+}

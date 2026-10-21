@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { pipeline } from "node:stream";
 import type { PreviewKind } from "../shared/preview.ts";
-import { viewerHtml } from "./viewer.ts";
+import { mediaHtml, viewerHtml } from "./viewer.ts";
 
 const KINDS: Record<string, PreviewKind> = {
   ".pdf": "pdf",
@@ -155,7 +155,10 @@ export async function openPreview(
     rootByToken.set(token, root);
   }
   const listening = await ensureServer();
-  const route = path.extname(file).toLowerCase() === ".pdf" ? "view" : "f";
+  // Paseo's browser tab renders HTML directly but shows a blank page for a bare image, video, audio,
+  // or PDF document, so those open inside a wrapper page.
+  const kind = KINDS[path.extname(file).toLowerCase()];
+  const route = kind && kind !== "html" ? "view" : "f";
   return { url: `http://127.0.0.1:${listening}/${token}/${route}/${toUrlPath(file)}` };
 }
 
@@ -206,6 +209,20 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     const target = await realpath(fromUrlPath(tail)).catch(() => "");
     if (!isInside(root, target)) return send(res, 403, "forbidden");
     if (route === "view") {
+      const kind = KINDS[path.extname(target).toLowerCase()];
+      if (!kind || kind === "html") return send(res, 403, "forbidden");
+      const fileUrl = `/${token}/f/${toUrlPath(target)}`;
+      if (kind !== "pdf") {
+        res.writeHead(200, {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+          "referrer-policy": "no-referrer",
+          "content-security-policy":
+            "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'",
+        });
+        res.end(mediaHtml(fileUrl, path.basename(target), kind));
+        return;
+      }
       const nonce = randomBytes(16).toString("base64");
       res.writeHead(200, {
         "content-type": "text/html; charset=utf-8",
@@ -216,7 +233,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
           "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob:; " +
           "form-action 'none'; base-uri 'none'",
       });
-      res.end(viewerHtml(`/${token}`, `/${token}/f/${toUrlPath(target)}`, path.basename(target), nonce));
+      res.end(viewerHtml(`/${token}`, fileUrl, path.basename(target), nonce));
       return;
     }
     const type = MIME[path.extname(target).toLowerCase()];

@@ -128,7 +128,13 @@ test("server lists, opens, and serves only workspace files", async (t) => {
   assert.ok(view.body.includes(new URL(viewUrl.replace("/view/", "/f/")).pathname), "viewer points at the raw file");
   assert.match(String(view.headers["content-security-policy"]), /script-src 'self' 'nonce-/);
 
-  const pngUrl = a.url;
+  // Images open in a wrapper page (a bare image document is blank in Paseo's browser tab).
+  assert.match(a.url, /\/view\//);
+  const imagePage = await get(a.url);
+  assert.equal(imagePage.status, 200);
+  assert.match(imagePage.body, /<img src="[^"]*\/f\/[^"]*new%20%231\.png"/);
+  assert.match(String(imagePage.headers["content-security-policy"]), /default-src 'none'; img-src 'self'/);
+  const pngUrl = a.url.replace("/view/", "/f/");
   const png = await get(pngUrl);
   assert.equal(png.body, "0123456789");
   assert.match(String(png.headers["content-security-policy"]), /^sandbox .*form-action 'none'/);
@@ -143,6 +149,7 @@ test("server lists, opens, and serves only workspace files", async (t) => {
   assert.equal(head.headers["content-length"], "10");
 
   const { url: htmlUrl } = await openPreview({ workspaceId: "ws", path: "site/index.html" }, ctx);
+  assert.match(htmlUrl, /\/f\//, "HTML opens directly");
   assert.equal((await get(new URL("style.css", htmlUrl).href)).body, "body{}", "relative assets resolve");
 
   const origin = new URL(pngUrl).origin;
@@ -157,12 +164,14 @@ test("server lists, opens, and serves only workspace files", async (t) => {
   assert.equal((await get(`${origin}/${token}/pdfjs/%2E%2E/package.json`)).status, 404);
   assert.equal((await get(pngUrl, {}, "POST")).status, 405);
   assert.equal((await get(`${origin}/${token}/f/%E0%A4%A`)).status, 400);
+  assert.equal((await get(`${origin}/${token}/view/${toUrlPath(path.join(root, ".env"))}`)).status, 403, "wrapper refuses unlisted types");
+  assert.equal((await get(htmlUrl.replace("/f/", "/view/"))).status, 403, "wrapper refuses HTML");
 
   // Each workspace gets its own token; one workspace's token cannot reach another's files.
   const { url: otherUrl } = await openPreview({ workspaceId: "other", path: "other.png" }, ctx);
   const otherToken = new URL(otherUrl).pathname.split("/")[1];
   assert.notEqual(otherToken, token);
-  assert.equal((await get(otherUrl)).body, "other");
+  assert.equal((await get(otherUrl.replace("/view/", "/f/"))).body, "other");
   assert.equal((await get(fileUrl(path.join(other, "other.png")))).status, 403);
   assert.equal((await get(fileUrl(path.join(root, "new #1.png"), otherToken))).status, 403);
 });
