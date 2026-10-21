@@ -8,7 +8,7 @@ import { pipeline } from "node:stream";
 import type { PreviewKind } from "../shared/preview.ts";
 import { mediaHtml, viewerHtml } from "./viewer.ts";
 
-const KINDS: Record<string, PreviewKind> = {
+export const KINDS: Record<string, PreviewKind> = {
   ".pdf": "pdf",
   ".png": "image", ".jpg": "image", ".jpeg": "image", ".gif": "image", ".webp": "image",
   ".avif": "image", ".bmp": "image", ".svg": "image", ".ico": "image",
@@ -17,7 +17,7 @@ const KINDS: Record<string, PreviewKind> = {
   ".html": "html", ".htm": "html",
 };
 // Only these extensions are served; anything else (.env, keys, source) is refused.
-const MIME: Record<string, string> = {
+export const MIME: Record<string, string> = {
   ".pdf": "application/pdf",
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
   ".webp": "image/webp", ".avif": "image/avif", ".bmp": "image/bmp", ".svg": "image/svg+xml",
@@ -88,17 +88,20 @@ export function fromUrlPath(urlPath: string): string {
 }
 
 // ponytail: the daemon evals a bundle (no import.meta.url/__dirname), so locate our install
-// from the daemon config, then walk up like Node resolution (npm installs hoist deps).
-export function findPdfjsRoot(pluginDir?: string): string {
+// from the daemon config. Switch if the plugin API ever exposes its own directory.
+export function pluginDir(): string {
+  if (process.env.FILE_PREVIEW_DIR) return process.env.FILE_PREVIEW_DIR;
+  const home = process.env.PASEO_HOME ?? path.join(homedir(), ".paseo");
+  const config = JSON.parse(readFileSync(path.join(home, "config.json"), "utf8"));
+  const dir = config?.plugins?.["file-preview"]?.path;
+  if (typeof dir !== "string") throw new Error("file-preview: plugin path missing from Paseo config.json");
+  return dir;
+}
+
+/** pdfjs-dist location, walking up from the plugin directory like Node resolution (npm hoists). */
+export function findPdfjsRoot(dir?: string): string {
   if (process.env.FILE_PREVIEW_PDFJS_ROOT) return process.env.FILE_PREVIEW_PDFJS_ROOT;
-  let dir = pluginDir;
-  if (!dir) {
-    const home = process.env.PASEO_HOME ?? path.join(homedir(), ".paseo");
-    const config = JSON.parse(readFileSync(path.join(home, "config.json"), "utf8"));
-    dir = config?.plugins?.["file-preview"]?.path;
-    if (typeof dir !== "string") throw new Error("file-preview: plugin path missing from Paseo config.json");
-  }
-  for (let current = path.resolve(dir); ; current = path.dirname(current)) {
+  for (let current = path.resolve(dir ?? pluginDir()); ; current = path.dirname(current)) {
     const candidate = path.join(current, "node_modules", "pdfjs-dist");
     if (existsSync(path.join(candidate, "package.json"))) return candidate;
     if (path.dirname(current) === current) break;
@@ -106,7 +109,24 @@ export function findPdfjsRoot(pluginDir?: string): string {
   throw new Error("file-preview: pdfjs-dist is not installed; run `npm ci --omit=dev` in the plugin directory");
 }
 
-/** Resolve the directory from Paseo itself rather than trusting a client-supplied path. */
+/** A workspace-relative "/" path → its real path, rejecting anything outside the workspace. */
+export async function resolveWorkspaceFile(workspaceId: string, relative: string, paseo: WorkspaceLookup) {
+  const root = await workspaceRoot(workspaceId, paseo);
+  const file = await realpath(path.join(root, ...relative.split("/")));
+  if (!isInside(root, file)) throw new Error("File is outside the workspace");
+  return { root, file };
+}
+
+/** pdf.js install directory, or "" when pdfjs-dist is missing. */
+export function pdfjsDir(): string {
+  try {
+    pdfjsRoot ||= findPdfjsRoot();
+  } catch (error) {
+    console.warn(String(error));
+  }
+  return pdfjsRoot;
+}
+
 async function workspaceRoot(workspaceId: string, paseo: WorkspaceLookup): Promise<string> {
   const workspace = await paseo.workspaces.ref(workspaceId).refresh();
   if (!workspace?.workspaceDirectory) throw new Error(`Workspace ${workspaceId} has no directory`);
@@ -145,9 +165,7 @@ export async function openPreview(
   { workspaceId, path: relative }: { workspaceId: string; path: string },
   { paseo }: { paseo: WorkspaceLookup },
 ) {
-  const root = await workspaceRoot(workspaceId, paseo);
-  const file = await realpath(path.join(root, ...relative.split("/")));
-  if (!isInside(root, file)) throw new Error("File is outside the workspace");
+  const { root, file } = await resolveWorkspaceFile(workspaceId, relative, paseo);
   let token = tokenByRoot.get(root);
   if (!token) {
     token = randomBytes(16).toString("hex");
@@ -172,11 +190,7 @@ export function stopServer(): void {
 function ensureServer(): Promise<number> {
   starting ??= new Promise<number>((resolve, reject) => {
     // Without pdf.js, images/video/HTML still work; the PDF viewer reports the missing install.
-    try {
-      pdfjsRoot ||= findPdfjsRoot();
-    } catch (error) {
-      console.warn(String(error));
-    }
+    pdfjsDir();
     const s = createServer((req, res) => {
       handle(req, res).catch((error) => send(res, error instanceof URIError ? 400 : 500, "error"));
     });
@@ -203,6 +217,11 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   if (!root) return send(res, 404, "not found");
   const tail = rest.join("/");
 
+  // Lets the client check whether it can reach this server (same machine) before opening a tab.
+  if (route === "ping") {
+    res.writeHead(204, { "cache-control": "no-store", "access-control-allow-origin": "*" });
+    return void res.end();
+  }
   if (route === "view" || route === "f") {
     // ponytail: realpath then open is a TOCTOU window; a local process that can swap files
     // inside the workspace already has the access this would grant.

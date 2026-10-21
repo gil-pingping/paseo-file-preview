@@ -5,10 +5,29 @@ import { useMemo, useState } from "react";
 import { FlatList, Pressable, Text, TextInput, View } from "react-native";
 import { strings } from "../shared/i18n";
 import { listPreviewsRpc, openPreviewRpc, previewKinds, type PreviewKind } from "../shared/preview";
+import { InlineViewer } from "./inline-viewer";
 import { openExternal } from "./web";
 
 const t = strings();
 const NO_FILES: never[] = [];
+type InlineFile = { path: string; kind: "pdf" | "image" };
+const inline = (path: string, kind: PreviewKind): InlineFile | null =>
+  kind === "pdf" || kind === "image" ? { path, kind } : null;
+
+/** True when this client can reach the preview server, i.e. it runs on the daemon's computer. */
+async function reachable(url: string): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 1500);
+  try {
+    // url is http://127.0.0.1:<port>/<token>/...; ping lives under the same token.
+    await fetch(`${url.split("/").slice(0, 4).join("/")}/ping`, { signal: controller.signal });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export function PreviewPanel({ workspaceId, theme, navigation }: PluginWorkspacePanelProps) {
   // Rescan when the workspace moves; the server resolves the directory from the ID itself.
@@ -17,17 +36,26 @@ export function PreviewPanel({ workspaceId, theme, navigation }: PluginWorkspace
   const openPreview = useRpc(openPreviewRpc);
   const [filter, setFilter] = useState("");
   const [kind, setKind] = useState<PreviewKind | null>(null);
+  const [viewing, setViewing] = useState<InlineFile | null>(null);
   const query = useQuery({
     queryKey: ["file-preview", workspaceId, directory],
     queryFn: () => listPreviews({ workspaceId }),
     staleTime: 30_000,
     refetchOnWindowFocus: false,
   });
+  // Same computer: open a browser tab (full pdf.js viewer, video, HTML). Otherwise (mobile app,
+  // remote desktop) show PDFs and images inside the panel over RPC.
   const open = useMutation({
-    mutationFn: (path: string) => openPreview({ workspaceId, path }),
-    onSuccess: ({ url }) => {
-      if (navigation?.openBrowser) navigation.openBrowser({ url, workspaceId });
-      else void openExternal(url);
+    mutationFn: async ({ path, kind }: { path: string; kind: PreviewKind }) => {
+      const { url } = await openPreview({ workspaceId, path });
+      if (await reachable(url)) {
+        if (navigation?.openBrowser) navigation.openBrowser({ url, workspaceId });
+        else await openExternal(url);
+        return;
+      }
+      const file = inline(path, kind);
+      if (!file) throw new Error(t.remoteUnsupported);
+      setViewing(file);
     },
   });
 
@@ -45,6 +73,17 @@ export function PreviewPanel({ workspaceId, theme, navigation }: PluginWorkspace
   }, [all, filter, kind]);
 
   const { colors } = theme;
+  if (viewing) {
+    return (
+      <InlineViewer
+        workspaceId={workspaceId}
+        path={viewing.path}
+        kind={viewing.kind}
+        colors={colors}
+        onBack={() => setViewing(null)}
+      />
+    );
+  }
   const chip = (label: string, active: boolean, onPress: () => void) => (
     <Pressable
       key={label}
@@ -97,12 +136,13 @@ export function PreviewPanel({ workspaceId, theme, navigation }: PluginWorkspace
           .map((k) => chip(`${t.kinds[k]} ${counts[k]}`, kind === k, () => setKind(kind === k ? null : k)))}
       </View>
       {query.isError ? notice(`${t.listFailed}: ${String(query.error)}`) : null}
-      {open.isError ? notice(`${t.openFailed}: ${String(open.error)}`) : null}
+      {open.isError ? notice(`${t.openFailed}: ${open.error instanceof Error ? open.error.message : String(open.error)}`) : null}
       {query.data && query.data.total > all.length ? notice(t.truncated(all.length, query.data.total)) : null}
       <FlatList
         data={files}
         keyExtractor={(file) => file.path}
         ListEmptyComponent={notice(query.isLoading ? t.loading : t.empty)}
+        ListFooterComponent={files.length > 0 ? notice(t.viewHint) : null}
         renderItem={({ item }) => {
           const slash = item.path.lastIndexOf("/");
           return (
@@ -110,8 +150,9 @@ export function PreviewPanel({ workspaceId, theme, navigation }: PluginWorkspace
               accessibilityRole="link"
               accessibilityLabel={t.open(t.kinds[item.kind], item.path)}
               onPress={() => {
-                if (!open.isPending) open.mutate(item.path);
+                if (!open.isPending) open.mutate({ path: item.path, kind: item.kind });
               }}
+              onLongPress={() => setViewing(inline(item.path, item.kind))}
               style={({ pressed }) => ({
                 paddingHorizontal: 8,
                 paddingVertical: 6,

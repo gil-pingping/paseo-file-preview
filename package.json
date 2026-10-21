@@ -1,7 +1,7 @@
 {
   "name": "paseo-file-preview",
   "private": true,
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Paseo plugin that previews PDFs, images, video, audio, and HTML in a Paseo browser tab",
   "repository": {
     "type": "git",
@@ -34,6 +34,7 @@
     "zod": "^4.4.3"
   },
   "dependencies": {
+    "@napi-rs/canvas": "0.1.100",
     "pdfjs-dist": "4.10.38"
   },
   "type": "module"

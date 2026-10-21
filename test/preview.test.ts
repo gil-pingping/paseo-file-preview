@@ -6,8 +6,15 @@ import path from "node:path";
 import { test } from "node:test";
 
 process.env.FILE_PREVIEW_PDFJS_ROOT = path.resolve("node_modules/pdfjs-dist");
+process.env.FILE_PREVIEW_DIR = path.resolve(".");
 const { findPdfjsRoot, fromUrlPath, isInside, listPreviews, openPreview, parseRange, stopServer, toUrlPath } =
   await import("../server/preview.ts");
+
+test("RPC contracts load (Paseo rejects names that are not lowercase)", async () => {
+  const contracts = await import("../shared/preview.ts");
+  const names = Object.values(contracts).flatMap((c) => (c && typeof c === "object" && "name" in c ? [c.name] : []));
+  assert.deepEqual(names.sort(), ["preview.list", "preview.open", "preview.pdf-info", "preview.pdf-page", "preview.read-image"]);
+});
 
 test("UI strings follow the locale: Korean for ko, English otherwise", async () => {
   const { strings } = await import("../shared/i18n.ts");
@@ -175,3 +182,70 @@ test("server lists, opens, and serves only workspace files", async (t) => {
   assert.equal((await get(fileUrl(path.join(other, "other.png")))).status, 403);
   assert.equal((await get(fileUrl(path.join(root, "new #1.png"), otherToken))).status, 403);
 });
+
+test("remote viewing: image chunks reassemble, PDF pages render, other files are refused", async (t) => {
+  const { readImage, pdfInfo, pdfPage, closePdfs } = await import("../server/remote.ts");
+  t.after(closePdfs);
+  const tmp = await mkdtemp(path.join(tmpdir(), "file-preview-remote-"));
+  // A 1 MB "image" spans three 384 KB chunks.
+  const bytes = Buffer.alloc(1024 * 1024, 7);
+  await writeFile(path.join(tmp, "big.png"), bytes);
+  await writeFile(path.join(tmp, "notes.txt"), "secret");
+  const ctx = fakePaseo({ ws: tmp });
+
+  let base64 = "";
+  for (let offset = 0, n = 0; ; n++) {
+    const chunk = await readImage({ workspaceId: "ws", path: "big.png", offset }, ctx);
+    assert.equal(chunk.mime, "image/png");
+    base64 += chunk.base64;
+    if (chunk.done) {
+      assert.equal(n, 2, "three chunks");
+      break;
+    }
+    offset = chunk.next;
+  }
+  assert.ok(Buffer.from(base64, "base64").equals(bytes), "chunks concatenate to the original bytes");
+  await assert.rejects(readImage({ workspaceId: "ws", path: "notes.txt", offset: 0 }, ctx), /Not an image/);
+  await assert.rejects(readImage({ workspaceId: "ws", path: "big.png", offset: 5 }, ctx), /Bad offset/);
+  await assert.rejects(readImage({ workspaceId: "ws", path: "../../etc/hosts", offset: 0 }, ctx));
+
+  await writeFile(path.join(tmp, "doc.pdf"), minimalPdf());
+  const info = await pdfInfo({ workspaceId: "ws", path: "doc.pdf" }, ctx);
+  assert.ok(info.pages >= 1);
+  const page = await pdfPage({ workspaceId: "ws", path: "doc.pdf", page: 1, width: 600 }, ctx);
+  assert.equal(page.width, 600);
+  assert.ok(Buffer.from(page.base64, "base64").subarray(0, 2).equals(Buffer.from([0xff, 0xd8])), "JPEG bytes");
+  await assert.rejects(pdfPage({ workspaceId: "ws", path: "doc.pdf", page: 99, width: 600 }, ctx), /No such page/);
+  await assert.rejects(pdfInfo({ workspaceId: "ws", path: "big.png" }, ctx), /Not a PDF/);
+});
+
+test("ping answers under a valid token only", async (t) => {
+  t.after(stopServer);
+  const tmp = await mkdtemp(path.join(tmpdir(), "file-preview-ping-"));
+  await writeFile(path.join(tmp, "a.png"), "x");
+  const { url } = await openPreview({ workspaceId: "ws", path: "a.png" }, fakePaseo({ ws: tmp }));
+  const base = url.split("/").slice(0, 4).join("/");
+  assert.equal((await get(`${base}/ping`)).status, 204);
+  assert.equal((await get(`${new URL(url).origin}/nope/ping`)).status, 404);
+});
+
+/** Smallest valid one-page PDF, built with correct xref offsets. */
+function minimalPdf(): Buffer {
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 4 0 R >>",
+    "<< /Length 35 >>\nstream\n0 0 1 rg 20 20 160 260 re f\nendstream",
+  ];
+  let body = "%PDF-1.4\n";
+  const offsets = objects.map((obj, i) => {
+    const at = body.length;
+    body += `${i + 1} 0 obj\n${obj}\nendobj\n`;
+    return at;
+  });
+  const xref = body.length;
+  body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  body += offsets.map((o) => `${String(o).padStart(10, "0")} 00000 n \n`).join("");
+  body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(body, "latin1");
+}
