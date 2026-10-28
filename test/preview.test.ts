@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, symlink, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, symlink, utimes, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { setTimeout as sleep } from "node:timers/promises";
 
 process.env.FILE_PREVIEW_PDFJS_ROOT = path.resolve("node_modules/pdfjs-dist");
 process.env.FILE_PREVIEW_DIR = path.resolve(".");
@@ -266,4 +267,47 @@ test("pdf worker answers in-flight requests after stdin closes", async () => {
   assert.equal(code, 0);
   assert.deepEqual(replies.map((r) => r.id).sort(), [1, 2]);
   assert.equal(replies.find((r) => r.id === 2).width, 400);
+});
+
+test("a timed-out render kills the worker, and the next request starts a fresh one", async (t) => {
+  const { pdfInfo, closePdfs } = await import("../server/remote.ts");
+  closePdfs();
+  const tmp = await mkdtemp(path.join(tmpdir(), "file-preview-timeout-"));
+  const pidFile = path.join(tmp, "worker.pid");
+  // Stands in for a worker stuck in a pdf.js parse after writing half a reply, behind a shim that
+  // runs it as a child instead of exec-ing it (as Volta's does). pidFile holds the stuck process.
+  const fakeNode = path.join(tmp, "node");
+  await writeFile(fakeNode, `#!/bin/sh\nprintf '{"id":1,"pa'\nsh -c 'echo $$ > "${pidFile}"; exec sleep 600'\n`, { mode: 0o755 });
+  await writeFile(path.join(tmp, "doc.pdf"), minimalPdf());
+  const pids: number[] = [];
+  t.after(() => {
+    delete process.env.FILE_PREVIEW_NODE;
+    delete process.env.FILE_PREVIEW_RENDER_TIMEOUT_MS;
+    closePdfs();
+    for (const pid of pids) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {}
+    }
+  });
+  process.env.FILE_PREVIEW_NODE = fakeNode;
+  process.env.FILE_PREVIEW_RENDER_TIMEOUT_MS = "1000"; // macOS can take ~250 ms to first exec a new script
+  const ctx = fakePaseo({ ws: tmp });
+
+  const timedOutWorker = async () => {
+    await assert.rejects(pdfInfo({ workspaceId: "ws", path: "doc.pdf" }, ctx), /timed out/);
+    const pid = Number(await readFile(pidFile, "utf8"));
+    pids.push(pid);
+    for (const deadline = Date.now() + 3000; Date.now() < deadline; await sleep(50)) {
+      try {
+        process.kill(pid, 0);
+      } catch (error) {
+        assert.equal((error as NodeJS.ErrnoException).code, "ESRCH");
+        return pid;
+      }
+    }
+    assert.fail(`worker ${pid} still running after the timeout`);
+  };
+  const first = await timedOutWorker();
+  assert.notEqual(await timedOutWorker(), first, "a fresh worker replaces the killed one");
 });

@@ -13,6 +13,7 @@ The daemon side scans the workspace directory, skipping hidden folders and build
 - Paseo 0.11.1 or newer with plugins enabled. npm must be available on the daemon host so installation can fetch pdf.js. Without it, PDFs cannot open but other files still preview.
 - Works when Paseo Desktop and its daemon run on the same computer, which is the default setup. Previews open in the in-app browser.
 - On the mobile app, or when you view a daemon on another computer (relay, LAN, or Tailscale), PDFs and images open inside the panel instead. The daemon sends image bytes and renders PDF pages to images through plugin messages. Video, audio, and HTML are not available there, because the preview server listens on `127.0.0.1` of the daemon host.
+- Password-protected PDFs cannot open in the panel, including on the mobile app and remote clients. Open them in Paseo Desktop on the daemon's computer, where the browser viewer asks for the password.
 - Rendering PDF pages for the panel runs the system `node` on the daemon host, which installation already requires through npm.
 - Long-press a PDF or image to view it in the panel on any client.
 - The panel follows your system language: Korean or English.

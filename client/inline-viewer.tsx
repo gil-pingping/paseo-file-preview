@@ -61,7 +61,7 @@ function ImageView({ workspaceId, path, colors, width }: { workspaceId: string; 
     if (image.data) Image.getSize(image.data, (w, h) => h > 0 && setRatio(w / h), () => {});
   }, [image.data]);
 
-  if (!image.data) return <Status colors={colors} text={image.isError ? String(image.error) : t.loading} />;
+  if (!image.data) return <Status colors={colors} text={image.isError ? errorText(image.error) : t.loading} />;
   return (
     <ScrollView maximumZoomScale={4} minimumZoomScale={1} contentContainerStyle={{ padding: 8 }}>
       <Image source={{ uri: image.data }} resizeMode="contain" style={{ width: width - 16, aspectRatio: ratio }} />
@@ -78,7 +78,7 @@ function PdfView({ workspaceId, path, colors, width }: { workspaceId: string; pa
   });
   const pages = useMemo(() => Array.from({ length: info.data?.pages ?? 0 }, (_, i) => i + 1), [info.data]);
 
-  if (!info.data) return <Status colors={colors} text={info.isError ? String(info.error) : t.loading} />;
+  if (!info.data) return <Status colors={colors} text={info.isError ? errorText(info.error) : t.loading} />;
   return (
     <FlatList
       data={pages}
@@ -119,11 +119,17 @@ function PdfPage(props: { workspaceId: string; path: string; page: number; width
         />
       ) : (
         <Text style={{ color: "#888888", textAlign: "center" }}>
-          {rendered.isError ? String(rendered.error) : `${t.page(page)} · ${t.loading}`}
+          {rendered.isError ? errorText(rendered.error) : `${t.page(page)} · ${t.loading}`}
         </Text>
       )}
     </View>
   );
+}
+
+/** The daemon's message without the "DaemonRpcError:" prefix; the password case gets advice instead. */
+function errorText(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return /password protected/i.test(message) ? t.pdfPassword : message;
 }
 
 function Status({ colors, text }: { colors: Colors; text: string }) {

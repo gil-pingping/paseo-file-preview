@@ -11,7 +11,6 @@ const IMAGE_CHUNK = 384 * 1024; // multiple of 3: base64 chunks concatenate into
 const IMAGE_LIMIT = 20 * 1024 * 1024;
 const PDF_LIMIT = 200 * 1024 * 1024;
 const PAGE_WIDTH = { min: 320, max: 1800 };
-const RENDER_TIMEOUT_MS = 60_000;
 
 type Ctx = { paseo: WorkspaceLookup };
 
@@ -59,26 +58,33 @@ async function pdfFile(workspaceId: string, relative: string, paseo: WorkspaceLo
 // requires npm on the daemon host, so `node` is there too.
 let worker: ChildProcessWithoutNullStreams | null = null;
 let nextId = 1;
-const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+const pending = new Map<
+  number,
+  { child: ChildProcessWithoutNullStreams; resolve: (value: unknown) => void; reject: (error: Error) => void }
+>();
 
 function startWorker(): ChildProcessWithoutNullStreams {
   const root = pdfjsDir();
   if (!root) throw new Error("The PDF viewer (pdfjs-dist) is not installed on the daemon host");
   const child = spawn(process.env.FILE_PREVIEW_NODE ?? "node", [path.join(pluginDir(), "server", "pdf-worker.mjs"), root], {
     stdio: ["pipe", "pipe", "pipe"],
+    detached: process.platform !== "win32", // own process group, so killWorker reaches a shim's child
   });
-  const fail = (error: Error) => {
-    for (const { reject } of pending.values()) reject(error);
-    pending.clear();
-    if (worker === child) worker = null;
-  };
+  const fail = (error: Error) => failWorker(child, error);
   child.on("error", (error) =>
     fail(new Error(/ENOENT/.test(String(error)) ? "PDF rendering needs Node.js (`node`) on the daemon host" : String(error))),
   );
   child.on("exit", (code) => fail(new Error(`PDF renderer exited (${code})`)));
+  child.stdin.on("error", () => {}); // a dead worker's EPIPE; the exit handler reports the failure
   child.stderr.on("data", (chunk) => console.warn(`[pdf-worker] ${String(chunk).trim()}`));
   createInterface({ input: child.stdout }).on("line", (line) => {
-    const { id, error, ...result } = JSON.parse(line);
+    let reply;
+    try {
+      reply = JSON.parse(line);
+    } catch {
+      return; // a reply cut short when the worker was killed; the exit handler rejects its request
+    }
+    const { id, error, ...result } = reply;
     const call = pending.get(id);
     if (!call) return;
     pending.delete(id);
@@ -88,16 +94,38 @@ function startWorker(): ChildProcessWithoutNullStreams {
   return child;
 }
 
+/** Signals the worker's process group: a version-manager shim (Volta) may run the real node as its child. */
+function killWorker(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals): void {
+  try {
+    process.kill(-child.pid!, signal);
+  } catch {
+    child.kill(signal);
+  }
+}
+
+/** Rejects the requests sent to `child` and forgets it, so the next request starts a fresh worker. */
+function failWorker(child: ChildProcessWithoutNullStreams, error: Error): void {
+  for (const [id, call] of pending) {
+    if (call.child !== child) continue;
+    pending.delete(id);
+    call.reject(error);
+  }
+  if (worker === child) worker = null;
+}
+
 function render(request: Record<string, unknown>): Promise<unknown> {
   worker ??= startWorker();
   const child = worker;
   const id = nextId++;
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
-      pending.delete(id);
-      reject(new Error("PDF rendering timed out"));
-    }, RENDER_TIMEOUT_MS);
+      // pdf.js cannot cancel a parse or render once it holds the worker's event loop, so a stuck
+      // worker would keep its CPU and memory forever. Kill it; queued requests fail with this one.
+      failWorker(child, new Error("PDF rendering timed out"));
+      killWorker(child, "SIGKILL");
+    }, Number(process.env.FILE_PREVIEW_RENDER_TIMEOUT_MS) || 60_000);
     pending.set(id, {
+      child,
       resolve: (value) => (clearTimeout(timer), resolve(value)),
       reject: (error) => (clearTimeout(timer), reject(error)),
     });
@@ -107,6 +135,6 @@ function render(request: Record<string, unknown>): Promise<unknown> {
 
 export function closePdfs(): void {
   worker?.stdin.end();
-  worker?.kill();
+  if (worker) killWorker(worker, "SIGTERM");
   worker = null;
 }

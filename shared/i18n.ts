@@ -17,6 +17,8 @@ const en = {
   remoteUnsupported:
     "This device cannot reach the daemon's computer. Video, audio, and HTML previews need Paseo Desktop on that computer.",
   viewHint: "Long-press a PDF or image to view it here.",
+  pdfPassword:
+    "Password-protected PDFs can't open in the panel. Open the file in Paseo Desktop on the daemon's computer, where the PDF viewer asks for the password.",
 };
 
 const ko: typeof en = {
@@ -36,6 +38,7 @@ const ko: typeof en = {
   page: (n) => `${n}쪽`,
   remoteUnsupported: "이 기기에서는 데몬이 도는 컴퓨터에 직접 연결할 수 없어요. 영상·오디오·HTML은 그 컴퓨터의 Paseo 데스크톱에서 열어 주세요.",
   viewHint: "PDF·이미지를 길게 누르면 여기서 바로 볼 수 있어요.",
+  pdfPassword: "암호가 걸린 PDF는 패널에서 열 수 없어요. 데몬이 도는 컴퓨터의 Paseo 데스크톱에서 열면 암호를 입력할 수 있어요.",
 };
 
 export type Strings = typeof en;
