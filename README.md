@@ -36,15 +36,27 @@ Then open the right-hand panel's `+` menu in a workspace and choose **Preview**.
 
 Workspace files can be untrusted, for example in cloned repositories or downloaded PDFs.
 
-- The server answers only requests whose `Host` is `127.0.0.1:<port>`, which blocks DNS rebinding.
+- The server answers only requests whose `Host` is `<bind address>:<port>` (`127.0.0.1` by default), which blocks DNS rebinding.
+- With LAN access on, it also checks the client address and refuses anything outside the bind address and the allowed networks.
 - Each workspace gets its own secret token. A URL serves a file only if its real path, after resolving symlinks, is inside that token's workspace.
 - Only previewable types and their page assets (CSS, JS, fonts) are served. Other files such as `.env` or keys are refused.
 - Workspace files are served with `Content-Security-Policy: sandbox` (no `allow-same-origin`), `default-src 'self' https:`, `form-action 'none'`, `nosniff`, and `no-referrer`. Scripts in a previewed HTML or SVG file run in an opaque origin, so they cannot read other files or reach other localhost services such as the Paseo daemon.
 - The PDF viewer page has a strict nonce-based CSP, and pdf.js runs with `isEvalSupported: false`.
 
+## LAN access
+
+By default the preview server listens on `127.0.0.1`, so video, audio, and HTML open only in Paseo Desktop on the daemon's computer. To open them from another computer on the same network (for example Paseo Desktop on a Windows PC connected to a Mac daemon), open **Settings → Plugins**, select the settings button (cog) on the File preview row, switch on **Allow LAN access**, and set:
+
+- **Bind address:** a private IPv4 address of the daemon's computer, such as `192.168.0.10`. Use a fixed address; previews stop working from other devices if it changes.
+- **Allowed networks:** private IPv4 CIDRs no wider than `/16`, such as `192.168.0.0/24`.
+
+LAN access stays off until the switch is on and both fields are set; switching it off returns the server to `127.0.0.1` without clearing the fields. Wildcard (`0.0.0.0`), public, and loopback bind addresses are refused, and so are networks wider than `/16`. Changing the bind address restarts the preview server; open the file again from the panel.
+
+With LAN access on, any device in the allowed networks that obtains a preview link can fetch the previewable files of the workspaces you opened from the panel, until the plugin stops. The secret token, the `Host` check, the file-type allowlist, and the sandbox still apply. Turn it on only for a network you trust. IPv6 is not supported.
+
 ## Limits
 
-- Video, audio, and HTML preview need Paseo Desktop on the daemon's computer. The preview server listens on the daemon host's `127.0.0.1`, and Paseo's `openBrowser` opens URLs in the client's own webview without tunnelling them. On mobile and remote clients only PDFs and images are available, inside the panel, without text search. Password-protected PDFs cannot open there.
+- Video, audio, and HTML preview need Paseo Desktop on the daemon's computer, or [LAN access](#lan-access) from another computer on the same network. The preview server listens on the daemon host's `127.0.0.1` by default, and Paseo's `openBrowser` opens URLs in the client's own webview without tunnelling them. On mobile and remote clients only PDFs and images are available, inside the panel, without text search. Password-protected PDFs cannot open there.
 - PDF rendering for the panel needs the system `node` on the daemon host.
 - Paseo plugin panels cannot embed web pages, so previews open in a separate browser tab, not inside the file tab.
 - Office documents are not supported. HTML that loads JavaScript modules or fetches its own files fails inside the sandbox.

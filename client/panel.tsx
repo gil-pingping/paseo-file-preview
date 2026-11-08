@@ -19,7 +19,7 @@ async function reachable(url: string): Promise<boolean> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 1500);
   try {
-    // url is http://127.0.0.1:<port>/<token>/...; ping lives under the same token.
+    // url is http://<host>:<port>/<token>/...; ping lives under the same token.
     await fetch(`${url.split("/").slice(0, 4).join("/")}/ping`, { signal: controller.signal });
     return true;
   } catch {
