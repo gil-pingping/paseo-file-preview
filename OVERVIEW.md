@@ -12,10 +12,11 @@ The daemon side scans the workspace directory, skipping hidden folders and build
 
 - Paseo 0.11.1 or newer with plugins enabled. npm must be available on the daemon host so installation can fetch pdf.js. Without it, PDFs cannot open but other files still preview.
 - Works when Paseo Desktop and its daemon run on the same computer, which is the default setup. Previews open in the in-app browser.
-- On the mobile app, or when you view a daemon on another computer (relay, LAN, or Tailscale), PDFs and images open inside the panel instead. The daemon sends image bytes and renders PDF pages to images through plugin messages. Video, audio, and HTML are not available there, because the preview server listens on `127.0.0.1` of the daemon host.
+- On the mobile app, or when you view a daemon on another computer (relay, LAN, or Tailscale), PDFs and images open inside the panel instead. The daemon sends image bytes and renders PDF pages to images through plugin messages. Video, audio, and HTML are not available there, because the preview server listens on `127.0.0.1` of the daemon host. A computer on the same network can open them if you turn on LAN access.
 - Password-protected PDFs cannot open in the panel, including on the mobile app and remote clients. Open them in Paseo Desktop on the daemon's computer, where the browser viewer asks for the password.
 - Rendering PDF pages for the panel runs the system `node` on the daemon host, which installation already requires through npm.
 - Long-press a PDF or image to view it in the panel on any client.
 - The panel follows your system language: Korean or English.
 - Files cannot be shown inside the file tab itself. Plugin panels cannot embed web pages, so previews open in a separate tab.
+- LAN access (the settings button on the File preview row in Settings → Plugins) lets devices on your network open video, audio, and HTML previews. It is off by default; switching it on needs a private bind address of the daemon's computer and allowed private networks no wider than /16. Devices in those networks that obtain a preview link can fetch previewable files of workspaces you opened from the panel.
 - Office documents are not supported. HTML pages that load JavaScript modules may not work inside the sandbox.

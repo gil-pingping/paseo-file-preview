@@ -5,6 +5,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { homedir } from "node:os";
 import path from "node:path";
 import { pipeline } from "node:stream";
+import { clientAllowed, LOOPBACK, type NetworkConfig, resolveNetwork, type NetworkValues } from "../shared/network.ts";
 import type { PreviewKind } from "../shared/preview.ts";
 import { mediaHtml, viewerHtml } from "./viewer.ts";
 
@@ -59,6 +60,14 @@ const tokenByRoot = new Map<string, string>();
 let server: Server | null = null;
 let starting: Promise<number> | null = null;
 let port = 0;
+let network: NetworkConfig = { host: LOOPBACK, allow: [] };
+
+/** Applies the network settings; a changed bind address restarts the server on its next use. */
+export function configureNetwork(values: NetworkValues | null): void {
+  const next = resolveNetwork(values);
+  if (next.host !== network.host) stopServer();
+  network = next;
+}
 let pdfjsRoot = "";
 
 export function isInside(root: string, target: string): boolean {
@@ -177,7 +186,7 @@ export async function openPreview(
   // or PDF document, so those open inside a wrapper page.
   const kind = KINDS[path.extname(file).toLowerCase()];
   const route = kind && kind !== "html" ? "view" : "f";
-  return { url: `http://127.0.0.1:${listening}/${token}/${route}/${toUrlPath(file)}` };
+  return { url: `http://${network.host}:${listening}/${token}/${route}/${toUrlPath(file)}` };
 }
 
 export function stopServer(): void {
@@ -198,7 +207,7 @@ function ensureServer(): Promise<number> {
       starting = null;
       reject(error);
     });
-    s.listen(0, "127.0.0.1", () => {
+    s.listen(0, network.host, () => {
       server = s;
       port = (s.address() as { port: number }).port;
       resolve(port);
@@ -209,9 +218,10 @@ function ensureServer(): Promise<number> {
 
 async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
   // Host check blocks DNS rebinding; the token blocks other local pages guessing URLs.
-  if (req.headers.host !== `127.0.0.1:${port}`) return send(res, 403, "forbidden");
+  if (req.headers.host !== `${network.host}:${port}`) return send(res, 403, "forbidden");
+  if (!clientAllowed(network, req.socket.remoteAddress ?? "")) return send(res, 403, "forbidden");
   if (req.method !== "GET" && req.method !== "HEAD") return send(res, 405, "method not allowed");
-  const { pathname } = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
+  const { pathname } = new URL(req.url ?? "/", `http://${network.host}:${port}`);
   const [, token = "", route, ...rest] = pathname.split("/");
   const root = rootByToken.get(token);
   if (!root) return send(res, 404, "not found");
